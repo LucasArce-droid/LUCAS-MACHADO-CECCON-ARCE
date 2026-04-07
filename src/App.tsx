@@ -37,10 +37,16 @@ interface CartItem extends MenuItem {
 interface Order {
   id: string;
   date: string;
+  createdAt: number;
   items: CartItem[];
   total: number;
-  status: 'pending' | 'preparing' | 'delivered';
+  deliveryFee: number;
+  type: 'delivery' | 'pickup';
+  status: 'pending' | 'preparing' | 'shipped' | 'delivered';
 }
+
+// --- Constants ---
+const DELIVERY_FEE = 13.50;
 
 // --- Mock Data ---
 
@@ -151,6 +157,7 @@ export default function App() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [showToast, setShowToast] = useState<string | null>(null);
+  const [deliveryOption, setDeliveryOption] = useState<'delivery' | 'pickup'>('delivery');
 
   // Login Logic
   const [loginData, setLoginData] = useState({ username: '', password: '' });
@@ -180,11 +187,16 @@ export default function App() {
   const finalizeOrder = () => {
     if (cart.length === 0) return;
 
+    const now = new Date();
+    const fee = deliveryOption === 'delivery' ? DELIVERY_FEE : 0;
     const newOrder: Order = {
       id: Math.random().toString(36).substr(2, 9).toUpperCase(),
-      date: new Date().toLocaleString('pt-BR'),
+      date: now.toLocaleString('pt-BR'),
+      createdAt: now.getTime(),
       items: [...cart],
-      total: cartTotal,
+      total: cartTotal + fee,
+      deliveryFee: fee,
+      type: deliveryOption,
       status: 'pending'
     };
 
@@ -192,6 +204,27 @@ export default function App() {
     setCart([]);
     triggerToast('Pedido enviado com sucesso!');
     setTimeout(() => setActiveTab('orders'), 1000);
+  };
+
+  const updateOrderStatus = (orderId: string) => {
+    setOrders(prev => prev.map(order => {
+      if (order.id === orderId) {
+        const statusMap: Record<Order['status'], Order['status']> = {
+          'pending': 'preparing',
+          'preparing': 'shipped',
+          'shipped': 'delivered',
+          'delivered': 'pending'
+        };
+        const newStatus = statusMap[order.status];
+        triggerToast(`Pedido #${order.id} agora está: ${
+          newStatus === 'pending' ? 'Pendente' : 
+          newStatus === 'preparing' ? 'Preparando' : 
+          newStatus === 'shipped' ? 'Saiu para Entrega' : 'Entregue'
+        }`);
+        return { ...order, status: newStatus };
+      }
+      return order;
+    }));
   };
 
   const triggerToast = (msg: string) => {
@@ -374,6 +407,17 @@ export default function App() {
                 <div className="grid gap-6 text-left">
                   <div className="flex items-start gap-4 p-6 bg-bg rounded-3xl border border-gray-100">
                     <div className="bg-white p-3 rounded-2xl shadow-sm">
+                      <Truck className="text-primary w-6 h-6" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-dark">Taxa de Entrega</h3>
+                      <p className="text-primary font-bold text-xl">R$ {DELIVERY_FEE.toFixed(2).replace('.', ',')}</p>
+                      <p className="text-gray-500 text-sm">Valor fixo para toda a região central</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-4 p-6 bg-bg rounded-3xl border border-gray-100">
+                    <div className="bg-white p-3 rounded-2xl shadow-sm">
                       <MapPin className="text-primary w-6 h-6" />
                     </div>
                     <div>
@@ -397,7 +441,7 @@ export default function App() {
 
                 <div className="mt-12 p-6 bg-primary/5 rounded-3xl border border-primary/10">
                   <p className="text-sm text-primary font-medium">
-                    🚀 Entrega rápida em até 45 minutos para toda a região central!
+                    🚀 Entrega rápida em até 1 hora para toda a região central!
                   </p>
                 </div>
               </div>
@@ -433,19 +477,58 @@ export default function App() {
                       key={order.id}
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
-                      className="bg-white p-6 rounded-3xl shadow-sm border-l-8 border-primary"
+                      className="bg-white p-6 rounded-3xl shadow-sm border-l-8 border-primary relative overflow-hidden"
                     >
+                      {order.status !== 'delivered' && (
+                        <div className="absolute top-0 right-0 h-1 bg-gray-100 w-full">
+                          <motion.div 
+                            initial={{ width: '0%' }}
+                            animate={{ width: order.status === 'pending' ? '25%' : order.status === 'preparing' ? '60%' : '90%' }}
+                            className="h-full bg-primary"
+                          />
+                        </div>
+                      )}
+
                       <div className="flex justify-between items-start mb-4">
                         <div>
-                          <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">PEDIDO #{order.id}</span>
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">PEDIDO #{order.id}</span>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${order.type === 'delivery' ? 'bg-primary/10 text-primary' : 'bg-dark/10 text-dark'}`}>
+                              {order.type === 'delivery' ? 'TELE' : 'RETIRADA'}
+                            </span>
+                          </div>
                           <div className="flex items-center gap-2 text-gray-500 text-sm mt-1">
                             <Clock className="w-4 h-4" />
                             {order.date}
                           </div>
                         </div>
-                        <div className="bg-orange-50 text-primary px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1">
-                          <div className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse" />
-                          PREPARANDO
+                        <div className="flex flex-col items-end gap-2">
+                          <button 
+                            onClick={() => updateOrderStatus(order.id)}
+                            className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 transition-colors ${
+                              order.status === 'pending' ? 'bg-gray-100 text-gray-600' :
+                              order.status === 'preparing' ? 'bg-orange-50 text-primary' :
+                              order.status === 'shipped' ? 'bg-blue-50 text-blue-600' :
+                              'bg-green-50 text-green-600'
+                            }`}
+                          >
+                            <div className={`w-1.5 h-1.5 rounded-full ${
+                              order.status === 'pending' ? 'bg-gray-400' :
+                              order.status === 'preparing' ? 'bg-primary animate-pulse' :
+                              order.status === 'shipped' ? 'bg-blue-500 animate-bounce' :
+                              'bg-green-500'
+                            }`} />
+                            {order.status === 'pending' ? 'PENDENTE' : 
+                             order.status === 'preparing' ? 'PREPARANDO' : 
+                             order.status === 'shipped' ? 'SAIU PARA ENTREGA' : 'ENTREGUE'}
+                          </button>
+                          
+                          {order.status !== 'delivered' && (
+                            <div className="text-[10px] font-bold text-primary bg-primary/5 px-2 py-0.5 rounded-md flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              PREVISÃO: ~{order.type === 'delivery' ? '1 HORA' : '45 MIN'}
+                            </div>
+                          )}
                         </div>
                       </div>
                       
@@ -459,6 +542,12 @@ export default function App() {
                               <span className="font-medium">R$ {(item.price * item.quantity).toFixed(2)}</span>
                             </li>
                           ))}
+                          {order.deliveryFee > 0 && (
+                            <li className="flex justify-between text-sm pt-2 border-t border-gray-50 mt-2">
+                              <span className="text-gray-500 italic">Taxa de Entrega</span>
+                              <span className="font-medium">R$ {order.deliveryFee.toFixed(2)}</span>
+                            </li>
+                          )}
                         </ul>
                       </div>
 
@@ -482,25 +571,41 @@ export default function App() {
             initial={{ y: 100 }}
             animate={{ y: 0 }}
             exit={{ y: 100 }}
-            className="fixed bottom-6 left-4 right-4 md:left-1/2 md:right-auto md:-translate-x-1/2 md:w-full md:max-w-xl z-50"
+            className="fixed bottom-6 left-4 right-4 md:left-1/2 md:right-auto md:-translate-x-1/2 md:w-full md:max-w-2xl z-50"
           >
-            <div className="bg-dark text-white p-4 rounded-3xl shadow-2xl flex items-center justify-between gap-4 border border-white/10">
-              <div className="flex items-center gap-4">
-                <div className="bg-primary p-3 rounded-2xl relative">
+            <div className="bg-dark text-white p-4 rounded-[2rem] shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-4 border border-white/10">
+              <div className="flex items-center gap-4 w-full sm:w-auto">
+                <div className="bg-primary p-3 rounded-2xl relative shrink-0">
                   <ShoppingBag className="w-6 h-6" />
                   <span className="absolute -top-2 -right-2 bg-white text-dark text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center border-2 border-dark">
                     {cartCount}
                   </span>
                 </div>
-                <div>
-                  <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">Total do Carrinho</p>
-                  <p className="text-xl font-bold">R$ {cartTotal.toFixed(2)}</p>
+                <div className="flex-1">
+                  <div className="flex bg-white/10 p-1 rounded-xl mb-1 w-fit">
+                    <button 
+                      onClick={() => setDeliveryOption('delivery')}
+                      className={`px-3 py-1 rounded-lg text-[10px] font-bold transition-all ${deliveryOption === 'delivery' ? 'bg-primary text-white' : 'text-gray-400 hover:text-white'}`}
+                    >
+                      TELE
+                    </button>
+                    <button 
+                      onClick={() => setDeliveryOption('pickup')}
+                      className={`px-3 py-1 rounded-lg text-[10px] font-bold transition-all ${deliveryOption === 'pickup' ? 'bg-primary text-white' : 'text-gray-400 hover:text-white'}`}
+                    >
+                      RETIRADA
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">
+                    {deliveryOption === 'delivery' ? `Subtotal + Tele (R$ ${DELIVERY_FEE.toFixed(2)})` : 'Subtotal (Retirada)'}
+                  </p>
+                  <p className="text-xl font-bold">R$ {(cartTotal + (deliveryOption === 'delivery' ? DELIVERY_FEE : 0)).toFixed(2)}</p>
                 </div>
               </div>
               
               <button 
                 onClick={finalizeOrder}
-                className="bg-success hover:scale-105 active:scale-95 text-white px-6 py-3 rounded-2xl font-bold flex items-center gap-2 transition-all shadow-lg shadow-success/20"
+                className="w-full sm:w-auto bg-success hover:scale-105 active:scale-95 text-white px-8 py-4 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all shadow-lg shadow-success/20"
               >
                 ENVIAR PEDIDO
                 <Send className="w-4 h-4" />
