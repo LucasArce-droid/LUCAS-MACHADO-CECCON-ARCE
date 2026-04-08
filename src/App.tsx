@@ -16,7 +16,14 @@ import {
   Clock,
   MapPin,
   Phone,
-  Truck
+  Truck,
+  Trash2,
+  Minus,
+  CreditCard,
+  Banknote,
+  QrCode,
+  ChevronRight,
+  X
 } from 'lucide-react';
 
 // --- Types ---
@@ -43,6 +50,8 @@ interface Order {
   deliveryFee: number;
   type: 'delivery' | 'pickup';
   status: 'pending' | 'preparing' | 'shipped' | 'delivered';
+  paymentMethod: 'money' | 'card' | 'pix';
+  changeFor?: number;
 }
 
 // --- Constants ---
@@ -158,6 +167,16 @@ export default function App() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [showToast, setShowToast] = useState<string | null>(null);
   const [deliveryOption, setDeliveryOption] = useState<'delivery' | 'pickup'>('delivery');
+  const [paymentMethod, setPaymentMethod] = useState<'money' | 'card' | 'pix'>('card');
+  const [changeFor, setChangeFor] = useState<string>('');
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [, setTick] = useState(0);
+
+  // Force re-render every minute to update cancellation timers
+  React.useEffect(() => {
+    const timer = setInterval(() => setTick(t => t + 1), 60000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Login Logic
   const [loginData, setLoginData] = useState({ username: '', password: '' });
@@ -181,6 +200,16 @@ export default function App() {
     triggerToast(`${item.name} adicionado!`);
   };
 
+  const removeFromCart = (itemId: string) => {
+    setCart(prev => {
+      const existing = prev.find(i => i.id === itemId);
+      if (existing && existing.quantity > 1) {
+        return prev.map(i => i.id === itemId ? { ...i, quantity: i.quantity - 1 } : i);
+      }
+      return prev.filter(i => i.id !== itemId);
+    });
+  };
+
   const cartTotal = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
   const cartCount = cart.reduce((acc, item) => acc + item.quantity, 0);
 
@@ -197,11 +226,15 @@ export default function App() {
       total: cartTotal + fee,
       deliveryFee: fee,
       type: deliveryOption,
-      status: 'pending'
+      status: 'pending',
+      paymentMethod,
+      changeFor: paymentMethod === 'money' ? parseFloat(changeFor) || undefined : undefined
     };
 
     setOrders(prev => [newOrder, ...prev]);
     setCart([]);
+    setShowPaymentModal(false);
+    setChangeFor('');
     triggerToast('Pedido enviado com sucesso!');
     setTimeout(() => setActiveTab('orders'), 1000);
   };
@@ -225,6 +258,11 @@ export default function App() {
       }
       return order;
     }));
+  };
+
+  const cancelOrder = (orderId: string) => {
+    setOrders(prev => prev.filter(order => order.id !== orderId));
+    triggerToast(`Pedido #${orderId} cancelado.`);
   };
 
   const triggerToast = (msg: string) => {
@@ -375,13 +413,27 @@ export default function App() {
                         <div className="p-5">
                           <h3 className="text-lg font-bold text-dark mb-2">{item.name}</h3>
                           <p className="text-gray-500 text-sm line-clamp-2 mb-4">{item.description}</p>
-                          <button 
-                            onClick={() => addToCart(item)}
-                            className="w-full bg-dark hover:bg-primary text-white font-bold py-3 rounded-2xl flex items-center justify-center gap-2 transition-colors group-active:scale-95"
-                          >
-                            <Plus className="w-5 h-5" />
-                            ADICIONAR
-                          </button>
+                          <div className="flex gap-2">
+                            {cart.find(i => i.id === item.id) && (
+                              <button 
+                                onClick={() => removeFromCart(item.id)}
+                                className="flex-1 bg-gray-100 hover:bg-gray-200 text-dark font-bold py-3 rounded-2xl flex items-center justify-center transition-colors"
+                              >
+                                <Minus className="w-5 h-5" />
+                              </button>
+                            )}
+                            <button 
+                              onClick={() => addToCart(item)}
+                              className={`${cart.find(i => i.id === item.id) ? 'flex-[2]' : 'w-full'} bg-dark hover:bg-primary text-white font-bold py-3 rounded-2xl flex items-center justify-center gap-2 transition-colors group-active:scale-95`}
+                            >
+                              <Plus className="w-5 h-5" />
+                              {cart.find(i => i.id === item.id) ? (
+                                <span>{cart.find(i => i.id === item.id)?.quantity} NO CARRINHO</span>
+                              ) : (
+                                <span>ADICIONAR</span>
+                              )}
+                            </button>
+                          </div>
                         </div>
                       </motion.div>
                     ))}
@@ -503,25 +555,37 @@ export default function App() {
                           </div>
                         </div>
                         <div className="flex flex-col items-end gap-2">
-                          <button 
-                            onClick={() => updateOrderStatus(order.id)}
-                            className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 transition-colors ${
-                              order.status === 'pending' ? 'bg-gray-100 text-gray-600' :
-                              order.status === 'preparing' ? 'bg-orange-50 text-primary' :
-                              order.status === 'shipped' ? 'bg-blue-50 text-blue-600' :
-                              'bg-green-50 text-green-600'
-                            }`}
-                          >
-                            <div className={`w-1.5 h-1.5 rounded-full ${
-                              order.status === 'pending' ? 'bg-gray-400' :
-                              order.status === 'preparing' ? 'bg-primary animate-pulse' :
-                              order.status === 'shipped' ? 'bg-blue-500 animate-bounce' :
-                              'bg-green-500'
-                            }`} />
-                            {order.status === 'pending' ? 'PENDENTE' : 
-                             order.status === 'preparing' ? 'PREPARANDO' : 
-                             order.status === 'shipped' ? 'SAIU PARA ENTREGA' : 'ENTREGUE'}
-                          </button>
+                          <div className="flex items-center gap-2">
+                            {order.status === 'pending' && (Date.now() - order.createdAt < 5 * 60 * 1000) && (
+                              <button 
+                                onClick={() => cancelOrder(order.id)}
+                                className="p-2 text-red-500 hover:bg-red-50 rounded-full transition-colors flex items-center gap-1"
+                                title="Cancelar Pedido"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                                <span className="text-[10px] font-bold">CANCELAR</span>
+                              </button>
+                            )}
+                            <button 
+                              onClick={() => updateOrderStatus(order.id)}
+                              className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 transition-colors ${
+                                order.status === 'pending' ? 'bg-gray-100 text-gray-600' :
+                                order.status === 'preparing' ? 'bg-orange-50 text-primary' :
+                                order.status === 'shipped' ? 'bg-blue-50 text-blue-600' :
+                                'bg-green-50 text-green-600'
+                              }`}
+                            >
+                              <div className={`w-1.5 h-1.5 rounded-full ${
+                                order.status === 'pending' ? 'bg-gray-400' :
+                                order.status === 'preparing' ? 'bg-primary animate-pulse' :
+                                order.status === 'shipped' ? 'bg-blue-500 animate-bounce' :
+                                'bg-green-500'
+                              }`} />
+                              {order.status === 'pending' ? 'PENDENTE' : 
+                               order.status === 'preparing' ? 'PREPARANDO' : 
+                               order.status === 'shipped' ? 'SAIU PARA ENTREGA' : 'ENTREGUE'}
+                            </button>
+                          </div>
                           
                           {order.status !== 'delivered' && (
                             <div className="text-[10px] font-bold text-primary bg-primary/5 px-2 py-0.5 rounded-md flex items-center gap-1">
@@ -552,7 +616,18 @@ export default function App() {
                       </div>
 
                       <div className="flex justify-between items-center">
-                        <span className="text-gray-500 font-medium">Total do Pedido</span>
+                        <div className="flex flex-col">
+                          <span className="text-gray-500 font-medium">Total do Pedido</span>
+                          <div className="flex items-center gap-2 mt-1">
+                            {order.paymentMethod === 'money' && <Banknote className="w-4 h-4 text-gray-400" />}
+                            {order.paymentMethod === 'card' && <CreditCard className="w-4 h-4 text-gray-400" />}
+                            {order.paymentMethod === 'pix' && <QrCode className="w-4 h-4 text-gray-400" />}
+                            <span className="text-xs text-gray-400 font-medium uppercase">
+                              {order.paymentMethod === 'money' ? `Dinheiro ${order.changeFor ? `(Troco p/ R$ ${order.changeFor.toFixed(2)})` : ''}` : 
+                               order.paymentMethod === 'card' ? 'Cartão na Entrega' : 'Pix'}
+                            </span>
+                          </div>
+                        </div>
                         <span className="text-xl font-bold text-primary">R$ {order.total.toFixed(2)}</span>
                       </div>
                     </motion.div>
@@ -575,11 +650,14 @@ export default function App() {
           >
             <div className="bg-dark text-white p-4 rounded-[2rem] shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-4 border border-white/10">
               <div className="flex items-center gap-4 w-full sm:w-auto">
-                <div className="bg-primary p-3 rounded-2xl relative shrink-0">
+                <div className="bg-primary p-3 rounded-2xl relative shrink-0 group cursor-pointer" onClick={() => setCart([])}>
                   <ShoppingBag className="w-6 h-6" />
                   <span className="absolute -top-2 -right-2 bg-white text-dark text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center border-2 border-dark">
                     {cartCount}
                   </span>
+                  <div className="absolute -top-12 left-1/2 -translate-x-1/2 bg-red-500 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                    Limpar Carrinho
+                  </div>
                 </div>
                 <div className="flex-1">
                   <div className="flex bg-white/10 p-1 rounded-xl mb-1 w-fit">
@@ -604,14 +682,130 @@ export default function App() {
               </div>
               
               <button 
-                onClick={finalizeOrder}
+                onClick={() => setShowPaymentModal(true)}
                 className="w-full sm:w-auto bg-success hover:scale-105 active:scale-95 text-white px-8 py-4 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all shadow-lg shadow-success/20"
               >
-                ENVIAR PEDIDO
-                <Send className="w-4 h-4" />
+                CONTINUAR
+                <ChevronRight className="w-4 h-4" />
               </button>
             </div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Payment Modal */}
+      <AnimatePresence>
+        {showPaymentModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowPaymentModal(false)}
+              className="absolute inset-0 bg-dark/60 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl relative overflow-hidden"
+            >
+              <div className="p-8">
+                <div className="flex justify-between items-center mb-8">
+                  <h2 className="text-2xl font-bold text-dark">Pagamento</h2>
+                  <button 
+                    onClick={() => setShowPaymentModal(false)}
+                    className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                  >
+                    <X className="w-6 h-6 text-gray-400" />
+                  </button>
+                </div>
+
+                <div className="space-y-4 mb-8">
+                  <p className="text-sm font-bold text-gray-400 uppercase tracking-widest">Escolha como pagar:</p>
+                  
+                  <button 
+                    onClick={() => setPaymentMethod('card')}
+                    className={`w-full p-5 rounded-3xl border-2 transition-all flex items-center gap-4 ${paymentMethod === 'card' ? 'border-primary bg-primary/5' : 'border-gray-100 hover:border-gray-200'}`}
+                  >
+                    <div className={`p-3 rounded-2xl ${paymentMethod === 'card' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-400'}`}>
+                      <CreditCard className="w-6 h-6" />
+                    </div>
+                    <div className="text-left">
+                      <p className="font-bold text-dark">Cartão</p>
+                      <p className="text-xs text-gray-500">Débito ou Crédito na entrega</p>
+                    </div>
+                  </button>
+
+                  <button 
+                    onClick={() => setPaymentMethod('pix')}
+                    className={`w-full p-5 rounded-3xl border-2 transition-all flex items-center gap-4 ${paymentMethod === 'pix' ? 'border-primary bg-primary/5' : 'border-gray-100 hover:border-gray-200'}`}
+                  >
+                    <div className={`p-3 rounded-2xl ${paymentMethod === 'pix' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-400'}`}>
+                      <QrCode className="w-6 h-6" />
+                    </div>
+                    <div className="text-left">
+                      <p className="font-bold text-dark">Pix</p>
+                      <p className="text-xs text-gray-500">Pagamento instantâneo</p>
+                    </div>
+                  </button>
+
+                  <button 
+                    onClick={() => setPaymentMethod('money')}
+                    className={`w-full p-5 rounded-3xl border-2 transition-all flex items-center gap-4 ${paymentMethod === 'money' ? 'border-primary bg-primary/5' : 'border-gray-100 hover:border-gray-200'}`}
+                  >
+                    <div className={`p-3 rounded-2xl ${paymentMethod === 'money' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-400'}`}>
+                      <Banknote className="w-6 h-6" />
+                    </div>
+                    <div className="text-left flex-1">
+                      <p className="font-bold text-dark">Dinheiro</p>
+                      <p className="text-xs text-gray-500">Pagamento em espécie</p>
+                    </div>
+                  </button>
+
+                  <AnimatePresence>
+                    {paymentMethod === 'money' && (
+                      <motion.div 
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="pt-2">
+                          <label className="text-xs font-bold text-gray-400 uppercase mb-2 block">Precisa de troco para quanto?</label>
+                          <input 
+                            type="number"
+                            placeholder="Ex: 100.00"
+                            value={changeFor}
+                            onChange={(e) => setChangeFor(e.target.value)}
+                            className="w-full bg-gray-50 border-2 border-gray-100 rounded-2xl px-5 py-4 focus:border-primary outline-none transition-all font-bold"
+                          />
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+
+                <div className="bg-dark rounded-3xl p-6 mb-8">
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="text-gray-400 text-sm">Total a pagar</span>
+                    <span className="text-white font-bold text-2xl">R$ {(cartTotal + (deliveryOption === 'delivery' ? DELIVERY_FEE : 0)).toFixed(2)}</span>
+                  </div>
+                  <p className="text-[10px] text-gray-500 uppercase font-bold tracking-widest">
+                    {deliveryOption === 'delivery' ? 'Incluindo taxa de entrega' : 'Retirada no local'}
+                  </p>
+                </div>
+
+                <button 
+                  onClick={finalizeOrder}
+                  className="w-full bg-primary hover:bg-primary/90 text-white py-5 rounded-3xl font-bold text-lg flex items-center justify-center gap-3 shadow-xl shadow-primary/20 transition-all active:scale-95"
+                >
+                  FINALIZAR PEDIDO
+                  <Send className="w-5 h-5" />
+                </button>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 
